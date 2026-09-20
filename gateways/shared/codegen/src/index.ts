@@ -18,3 +18,5 @@ export {
 export type { AnyGatewayConfig } from "./load-config.ts";
 export { loadConfig } from "./load-config.ts";
 export { loadSchemas, SchemaStoreError } from "./schema-store.ts";
+export type { SchemasReport, SchemasUpdate } from "./update-schemas.ts";
+export { updateSchemas } from "./update-schemas.ts";

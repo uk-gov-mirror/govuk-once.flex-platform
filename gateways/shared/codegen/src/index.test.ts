@@ -27,6 +27,7 @@ describe("@repo/gateway-codegen", () => {
       "loadConfig",
       "loadSchemas",
       "main",
+      "updateSchemas",
     ]);
   });
 
