@@ -38,10 +38,16 @@ importers:
       '@scalar/openapi-parser':
         specifier: 0.29.1
         version: 0.29.1
+      '@smithy/signature-v4':
+        specifier: 5.7.3
+        version: 5.7.3
     devDependencies:
       '@aws-sdk/client-secrets-manager':
         specifier: 3.1128.0
         version: 3.1128.0
+      '@aws-sdk/credential-provider-node':
+        specifier: 3.972.82
+        version: 3.972.82
       '@repo/eslint-config':
         specifier: workspace:*
         version: link:../../../packages/eslint-config

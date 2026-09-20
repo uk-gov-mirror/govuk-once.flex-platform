@@ -16,10 +16,12 @@
     "@repo/gateway-runtime": "workspace:*",
     "@repo/gateway-types": "workspace:*",
     "@repo/utils": "workspace:*",
-    "@scalar/openapi-parser": "0.29.1"
+    "@scalar/openapi-parser": "0.29.1",
+    "@smithy/signature-v4": "5.7.3"
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "3.1128.0",
+    "@aws-sdk/credential-provider-node": "3.972.82",
     "@repo/eslint-config": "workspace:*",
     "@repo/gateway-codegen": "workspace:*",
     "@repo/tsconfig": "workspace:*",
