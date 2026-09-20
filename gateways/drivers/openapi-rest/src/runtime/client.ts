@@ -2,6 +2,7 @@ import { GatewayError } from "@repo/gateway-runtime";
 import type { DriverContext } from "@repo/gateway-types";
 
 import { validateHeaders } from "../headers.ts";
+import { type CompiledMetadata, readMetadata } from "../metadata.ts";
 import { outcomeForStatus } from "../outcomes.ts";
 import { hasControlCharacter, hasDotSegment } from "../path.ts";
 import type {
@@ -31,6 +32,8 @@ export interface ClientDeps {
   // Lowercased names nothing at request time may set: the headers authentication owns.
   readonly reservedHeaders: ReadonlySet<string>;
   readonly maxResponseBytes: number;
+  // What the gateway reports beside a result, and the response header each is read from.
+  readonly metadata: readonly CompiledMetadata[];
 }
 
 function joinPath(basePath: string, path: string): string {
@@ -118,7 +121,7 @@ export function createClient(
 
     // Everything from authentication to the last body byte happens inside one attempt, so the
     // policy timeout bounds the whole exchange.
-    return ctx.upstream(async (signal) => {
+    const response = await ctx.upstream(async (signal) => {
       // Later layers override earlier ones: driver defaults, static headers, the call's own,
       // then authentication, which nothing before it may name anyway.
       const headers = new Headers({ accept: "application/json" });
@@ -139,8 +142,21 @@ export function createClient(
         },
         signal,
         where,
+        // Read as the headers arrive, before the body and before the status is read as an
+        // outcome or an error: a caller gets an upstream's id for a request it refused, and for
+        // one whose body never finished arriving, as surely as for one it carried out.
+        (responseHeaders) => {
+          for (const [reported, value] of readMetadata(
+            responseHeaders,
+            deps.metadata,
+          )) {
+            ctx.meta(reported, value);
+          }
+        },
       );
     });
+
+    return response;
   }
 
   function mapResponse(response: OpenApiRestResponse) {

@@ -91,11 +91,17 @@ async function readBody(
 // GatewayError naming `where`, such as `for operation "x" (GET /x)`: a transport error is
 // reduced to a recognised name and code, and an abort is reported as such, since the runtime
 // treats anything thrown under an aborted signal as the timeout it was.
+// Called with the response's headers as soon as they arrive, before its body is read. What a
+// caller is told about an exchange it could not complete is the headers of it, so an upstream's
+// own id for a request whose body was too large, or whose stream broke, is still reported.
+export type HeadersReceived = (headers: Headers) => void;
+
 export async function sendRequest(
   deps: SendDeps,
   request: OutgoingRequest,
   signal: AbortSignal,
   where: string,
+  received?: HeadersReceived,
 ): Promise<OpenApiRestResponse> {
   let response: Response;
   let text: string;
@@ -107,6 +113,7 @@ export async function sendRequest(
       signal,
       redirect: "manual",
     });
+    received?.(response.headers);
     text = await readBody(
       response,
       deps.maxResponseBytes,

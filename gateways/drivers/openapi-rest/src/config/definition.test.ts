@@ -13,6 +13,10 @@ import { openapiRest } from "./definition.ts";
 const SPEC = "https://example.test/openapi.yml";
 const AUTH = noAuth();
 
+const METADATA = {
+  upstreamRequestId: { header: "X-Request-Id", schema: { type: "string" } },
+};
+
 describe("openapiRest", () => {
   it("builds a driver definition naming its type, spec and auth", () => {
     const definition = openapiRest({ spec: SPEC, auth: AUTH });
@@ -52,6 +56,7 @@ describe("openapiRest", () => {
       auth: AUTH,
       headers: { "x-api-version": "2" },
       maxResponseBytes: 4096,
+      metadata: METADATA,
     });
     expect(definition).toMatchObject({
       type: OPENAPI_REST_DRIVER_TYPE,
@@ -59,6 +64,7 @@ describe("openapiRest", () => {
       auth: AUTH,
       headers: { "x-api-version": "2" },
       maxResponseBytes: 4096,
+      metadata: METADATA,
     });
     expect(Object.keys(definition)).toEqual([
       "type",
@@ -69,6 +75,7 @@ describe("openapiRest", () => {
       "auth",
       "headers",
       "maxResponseBytes",
+      "metadata",
     ]);
   });
 
