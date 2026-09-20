@@ -267,7 +267,11 @@ integrations are implemented.
     validator's message; a failed read is reported as a fixed message with nothing of the
     library's error. An authentication definition declares the headers it owns; the driver
     reserves them before compiling operations, so no static header, mapping or handler can set
-    them, and the definition may set no other. Its state is built per executor, its network
+    them, and the definition may set no other. It is shown a copy of the request it is
+    authenticating, method, address, headers and body, because a scheme such as `sigV4` signs
+    the request rather than attaching a credential; nothing it does to the copy is sent. `sigV4`
+    takes its credentials from the gateway's own role through the platform's chain, never from
+    a secret. Its state is built per executor, its network
     access goes through the driver's transport facility, and nothing in a configuration module
     reads a secret or exchanges a token at import. Token and session expiry belong to the
     authentication definition. Nothing replays an upstream operation after an authentication

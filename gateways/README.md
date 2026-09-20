@@ -792,7 +792,7 @@ at all is reported together and fails the run.
 
 ### Authentication
 
-The `auth` field of `openapiRest` takes an authentication definition. Three come with the
+The `auth` field of `openapiRest` takes an authentication definition. Four come with the
 driver:
 
 | Definition | Secret | Sends |
@@ -800,6 +800,29 @@ driver:
 | `noAuth()` | `{}` | Nothing. For an upstream that needs no credential; the deployment still names a secret. |
 | `bearerToken()` | `{ "token": "..." }` | `Authorization: Bearer <token>` |
 | `apiKey({ header })` | `{ "apiKey": "..." }` | The key in the named header. |
+| `sigV4({ service, region })` | `{}` | An AWS Signature Version 4 over the request, in `Authorization`, `X-Amz-Date` and, for a role, `X-Amz-Security-Token`. It owns `X-Amz-Content-Sha256` as well, and sets none. |
+
+`sigV4` is for an upstream behind IAM authorisation, such as an API Gateway stage, whose
+`service` is `"execute-api"`, which is the only `service` it takes: signing is not one algorithm
+with a service name in it, and S3, say, wants the hash of the body in a header and its path left
+unnormalised, neither of which this does. Another service is added by implementing what it asks
+for rather than by naming it, so one that is merely named is refused where the authentication is
+built. It is not a credential attached to a request but a signature over one: the method, the
+address, the headers set so far and a hash of the body. The credentials are
+the gateway's own role's, from the platform's credential chain, never a secret's: a role's are
+short-lived and renewed by the platform, and what may call the upstream is granted where the
+role is defined. `service` and `region` are the upstream's and part of what is signed; they are
+the same wherever the gateway is deployed, so they are configuration. The signer is loaded on the
+first request and is bundled only into a gateway that uses `sigV4`; the credential chain is part
+of the AWS SDK, which the bundle carries like every other dependency.
+
+The hash of the body goes in the signature, not in a header, and `X-Amz-Content-Sha256` is owned
+so that nothing can supply one: the signer takes a hash already on a request in place of hashing
+the body, so a mapping that sent `UNSIGNED-PAYLOAD` would sign every body alike and the signature
+would stop binding what was sent. One that reaches the signer anyway is taken off first. A query
+parameter named `__proto__` is refused rather than signed: the signer reads a query through an
+ordinary object, where that name is the prototype and not a name, so the request would carry a
+parameter the signature did not cover.
 
 Each validates its secret strictly: the field must be a non-empty string that the transport
 sends exactly as stored, so it may contain no control character other than tab and no leading
@@ -856,6 +879,13 @@ export const clientCredentials = defineAuth({
 
 Concurrent requests on an expired token each exchange in this example; keep one pending
 promise for the exchange when the token endpoint should see it once.
+
+`headers` is given the request it is authenticating as well as the operation's name and the
+attempt's signal: the `method`, the `url` it is going to with its query, the `headers` set so far,
+the body's content type among them, and the `body` as it will be sent. Each is a copy, so what a
+flow does to one changes nothing that is sent; the headers it returns are the only thing it adds,
+and only the ones its definition declares. A scheme that signs a request needs all of it; one that
+attaches a token needs none.
 
 `headers` runs inside every request's attempt, so a secret read or an exchange counts against
 the operation's timeout, and a request that runs out of budget stops waiting; a read the
