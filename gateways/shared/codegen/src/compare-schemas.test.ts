@@ -456,6 +456,41 @@ describe("compareSchemas", () => {
     });
   });
 
+  describe("what a gateway reports beside a result", () => {
+    const reporting = (meta: Record<string, JSONSchema>): GatewaySchemas => ({
+      meta,
+      ...asInput({ type: "object" }),
+    });
+
+    it("accepts a name that is added and refuses one that is removed", () => {
+      const one = reporting({ requestId: { type: "string" } });
+      const two = reporting({
+        requestId: { type: "string" },
+        remaining: { type: "integer" },
+      });
+
+      expect(compareSchemas(one, two)).toEqual({
+        breaking: [],
+        compatible: ["meta.remaining: was added"],
+      });
+      expect(compareSchemas(two, one).breaking).toEqual([
+        "meta.remaining: was removed",
+      ]);
+      expect(
+        compareSchemas(asInput({ type: "object" }), one).compatible,
+      ).toEqual(["meta.requestId: was added"]);
+    });
+
+    it("reads each the way an outcome runs", () => {
+      expect(
+        compareSchemas(
+          reporting({ remaining: { type: "integer" } }),
+          reporting({ remaining: { type: "number" } }),
+        ).breaking,
+      ).toEqual(["meta.remaining.type: changed from integer to number"]);
+    });
+  });
+
   describe("shared definitions", () => {
     const ref = (name: string): JSONSchema => ({ $ref: name });
 

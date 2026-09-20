@@ -8,9 +8,13 @@ import { promisify } from "node:util";
 import type { GatewaySchemas, Validator } from "@repo/gateway-types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { emitValidators } from "./emit-validators.ts";
+import { compileValidators, emitValidators } from "./emit-validators.ts";
 
 const schemas: GatewaySchemas = {
+  meta: {
+    requestId: { type: "string", format: "uuid" },
+    remaining: { type: "integer", minimum: 0 },
+  },
   defs: {
     UserRecord: {
       type: "object",
@@ -108,6 +112,7 @@ interface IndexModule {
     getIdentityExchange: { input: Validator; outcomes: { record: Validator } };
     searchRecords: { input: Validator; outcomes: { page: Validator } };
   };
+  meta: { requestId: Validator; remaining: Validator };
 }
 
 const execFile = promisify(execFileCb);
@@ -186,6 +191,48 @@ describe("emitted files", () => {
       const source = await readFile(path.join(tmp, file), "utf-8");
       expect(source.startsWith("// GENERATED FILE.")).toBe(true);
     }
+  });
+});
+
+describe("metadata validation", () => {
+  it("exports a validator for each thing the gateway may report, by its name", () => {
+    expect(Object.keys(index.meta).toSorted()).toEqual([
+      "remaining",
+      "requestId",
+    ]);
+    expect(index.meta.requestId("dbcf549a-43db-4b95-aea8-1e6b792397bb")).toBe(
+      true,
+    );
+    expect(index.meta.requestId("not-a-uuid")).toBe(false);
+    expect(index.meta.remaining(3)).toBe(true);
+    expect(index.meta.remaining(-1)).toBe(false);
+  });
+
+  it("exports none for a gateway that reports nothing, so the entry point imports one either way", async () => {
+    const dir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "no-meta-")),
+    );
+    try {
+      await emitValidators(
+        { operations: { ping: { input: {}, outcomes: { ok: {} } } } },
+        dir,
+      );
+      const emitted = (await import(
+        pathToFileURL(path.join(dir, "index.js")).href
+      )) as { meta: object };
+      expect(emitted.meta).toEqual({});
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a name that cannot be an export", () => {
+    expect(() =>
+      compileValidators({
+        meta: { "request-id": { type: "string" } },
+        operations: { ping: { input: {}, outcomes: { ok: {} } } },
+      }),
+    ).toThrow(/Metadata "request-id" is not a valid JavaScript identifier/);
   });
 });
 
@@ -339,8 +386,68 @@ describe("barrel", () => {
     const schemas = (await import(
       pathToFileURL(path.join(tmp, "schemas.js")).href
     )) as Record<string, Validator>;
-    expect(index.validators.createUser.input).toBe(schemas.createUser_input);
+    expect(index.validators.createUser.input).toBe(schemas.op_createUser_input);
   });
+});
+
+describe("names one family cannot take from another", () => {
+  // Every name here is its author's — a definition, an operation with its outcomes, the
+  // gateway's metadata — and they share one namespace. Each schema admits one value and no
+  // other, so a validator wired to another's schema shows rather than merely generating.
+  const only = (value: string) => ({ const: value });
+
+  it("generates and wires each validator to its own schema", async () => {
+    const colliding: GatewaySchemas = {
+      // A definition named as a generated id is spelt, and keeps its name: a `$ref` names it.
+      defs: { op_ping_input: { type: "string" } },
+      // Metadata "input" beside an operation "meta".
+      meta: { input: only("meta-input") },
+      operations: {
+        // Two operations whose names and outcomes spell one another's.
+        a: { input: only("a-in"), outcomes: { b_outcome_c: only("a/b") } },
+        a_outcome_b: { input: only("aob-in"), outcomes: { c: only("aob/c") } },
+        meta: { input: only("meta-in"), outcomes: { ok: only("meta/ok") } },
+        ping: {
+          input: { $ref: "op_ping_input" },
+          outcomes: { ok: only("ping/ok") },
+        },
+      },
+    };
+    const dir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "emit-validators-names-")),
+    );
+    try {
+      await emitValidators(colliding, dir);
+      const emitted = (await import(
+        pathToFileURL(path.join(dir, "index.js")).href
+      )) as {
+        validators: Record<
+          string,
+          { input: Validator; outcomes: Record<string, Validator> }
+        >;
+        meta: Record<string, Validator>;
+      };
+
+      const wired = (found: Validator | undefined, admits: unknown): boolean =>
+        found?.(admits) === true && found(") not this one") === false;
+
+      expect(wired(emitted.validators.a?.input, "a-in")).toBe(true);
+      expect(wired(emitted.validators.a?.outcomes.b_outcome_c, "a/b")).toBe(
+        true,
+      );
+      expect(wired(emitted.validators.a_outcome_b?.input, "aob-in")).toBe(true);
+      expect(wired(emitted.validators.a_outcome_b?.outcomes.c, "aob/c")).toBe(
+        true,
+      );
+      expect(wired(emitted.validators.meta?.input, "meta-in")).toBe(true);
+      expect(wired(emitted.meta.input, "meta-input")).toBe(true);
+      // The definition kept its name, so the reference to it still leads there.
+      expect(emitted.validators.ping?.input("any string")).toBe(true);
+      expect(emitted.validators.ping?.input(1)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("generation errors", () => {

@@ -38,10 +38,50 @@ async function bundleModule(source: string): Promise<string> {
 // What generation produced, held before anything is written: a caller with a further check to
 // make runs it between the two steps, and a schema that is not a schema is refused by the
 // first, as itself, rather than reported as whatever that check makes of it.
+// What each validator ended up named, since a name is chosen rather than spelt out: the index
+// module is written from these rather than from the schemas again, so the two cannot drift.
+export interface OperationIds {
+  readonly input: string;
+  readonly outcomes: Readonly<Record<string, string>>;
+}
+
+export interface ValidatorIds {
+  readonly operations: Readonly<Record<string, OperationIds>>;
+  readonly meta: Readonly<Record<string, string>>;
+}
+
 export interface CompiledValidators {
   readonly schemas: GatewaySchemas;
   readonly exportNames: readonly string[];
+  readonly ids: ValidatorIds;
   readonly code: string;
+}
+
+// Three families of names share one namespace here, and all three are their author's: a
+// definition, an operation with its outcomes, and the gateway's metadata. Any way of spelling a
+// name out of the parts can be spelt by another name — an operation "meta" beside metadata
+// "input", an operation "a" with an outcome "b_outcome_c" beside an operation "a_outcome_b" with
+// an outcome "c", a definition called "op_ping_input" — and a collision fails the run on a
+// gateway that is otherwise sound. So a name is taken where it is free and moved aside where it
+// is not, in an order that does not depend on anything but the schemas.
+const OPERATION = "op";
+const METADATA = "meta";
+
+function namer(reserved: Iterable<string>) {
+  const taken = new Set(reserved);
+  return (...parts: readonly string[]): string => {
+    const base = parts.join("_");
+    if (!taken.has(base)) {
+      taken.add(base);
+      return base;
+    }
+    for (let next = 2; ; next += 1) {
+      const candidate = `${base}_${String(next)}`;
+      if (taken.has(candidate)) continue;
+      taken.add(candidate);
+      return candidate;
+    }
+  };
 }
 
 export function compileValidators(schemas: GatewaySchemas): CompiledValidators {
@@ -87,33 +127,52 @@ export function compileValidators(schemas: GatewaySchemas): CompiledValidators {
     registered.push({ $id, context });
   };
 
+  // A definition keeps the name it was written under: a `$ref` between definitions names the
+  // key, so its `$id` is not this generator's to choose. Everything else moves around them.
+  const defNames = Object.keys(schemas.defs ?? {});
   for (const [name, schema] of sortedEntries(schemas.defs ?? {})) {
     assertIdentifier(name, "Shared definition");
     register(schema, name, `shared definition "${name}"`);
   }
 
   const exportNames: string[] = [];
+  const nameFor = namer(defNames);
+  const operationIds: Record<string, OperationIds> = {};
+  const metaIds: Record<string, string> = {};
 
   for (const [opName, opSchemas] of sortedEntries(schemas.operations)) {
     assertIdentifier(opName, "Operation");
 
-    const inputId = `${opName}_input`;
+    const inputId = nameFor(OPERATION, opName, "input");
     register(opSchemas.input, inputId, `input of operation "${opName}"`);
     exportNames.push(inputId);
 
+    const outcomeIds: Record<string, string> = {};
     for (const [outcomeName, outcomeSchema] of sortedEntries(
       opSchemas.outcomes,
     )) {
       assertIdentifier(outcomeName, "Outcome");
-      const outcomeId = `${opName}_outcome_${outcomeName}`;
+      const outcomeId = nameFor(OPERATION, opName, "outcome", outcomeName);
       register(
         outcomeSchema,
         outcomeId,
         `outcome "${outcomeName}" of operation "${opName}"`,
       );
       exportNames.push(outcomeId);
+      outcomeIds[outcomeName] = outcomeId;
     }
+    operationIds[opName] = { input: inputId, outcomes: outcomeIds };
   }
+
+  for (const [name, schema] of sortedEntries(schemas.meta ?? {})) {
+    assertIdentifier(name, "Metadata");
+    const metaId = nameFor(METADATA, name);
+    register(schema, metaId, `metadata "${name}"`);
+    exportNames.push(metaId);
+    metaIds[name] = metaId;
+  }
+
+  const ids: ValidatorIds = { operations: operationIds, meta: metaIds };
 
   for (const { $id, context } of registered) {
     let validate;
@@ -147,26 +206,30 @@ export function compileValidators(schemas: GatewaySchemas): CompiledValidators {
     throw new Error("Failed to generate standalone validator code", { cause });
   }
 
-  return { schemas, exportNames, code };
+  return { schemas, exportNames, ids, code };
 }
 
 export async function writeValidators(
   compiled: CompiledValidators,
   outDir: string,
 ): Promise<void> {
-  const { schemas, exportNames, code } = compiled;
+  const { exportNames, ids, code } = compiled;
 
   // Not prettier-formatted: bundled output, and esbuild rejecting bad input is the same check.
   const schemasJs = await bundleModule(FORMATS_IMPORT + "\n" + code);
 
-  const operationEntries = sortedEntries(schemas.operations)
-    .map(([opName, opSchemas]) => {
-      const outcomes = sortedEntries(opSchemas.outcomes)
-        .map(([name]) => `${name}: ${opName}_outcome_${name},`)
+  const operationEntries = sortedEntries(ids.operations)
+    .map(([opName, opIds]) => {
+      const outcomes = sortedEntries(opIds.outcomes)
+        .map(([name, id]) => `${name}: ${id},`)
         .join("");
 
-      return `${opName}: { input: ${opName}_input, outcomes: { ${outcomes} } },`;
+      return `${opName}: { input: ${opIds.input}, outcomes: { ${outcomes} } },`;
     })
+    .join("");
+
+  const metaEntries = sortedEntries(ids.meta)
+    .map(([name, id]) => `${name}: ${id},`)
     .join("");
 
   const indexJs = await formatSource(
@@ -174,6 +237,9 @@ export async function writeValidators(
       `import { ${exportNames.join(", ")} } from "./schemas.js";`,
       "",
       `export const validators = { ${operationEntries} };`,
+      "",
+      "// What the gateway may report beside a result; empty for one that reports nothing.",
+      `export const meta = { ${metaEntries} };`,
     ].join("\n"),
     "babel",
   );
