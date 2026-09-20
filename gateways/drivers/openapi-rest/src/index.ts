@@ -23,6 +23,8 @@ export type {
 export type { OpenApiRestGatewayConfig } from "./config/definition.ts";
 export { openapiRest } from "./config/definition.ts";
 export { defineHandler } from "./config/handler.ts";
+export type { SigV4Options } from "./config/sigv4.ts";
+export { sigV4 } from "./config/sigv4.ts";
 export type { MetadataConfig, ResponseMetadata } from "./metadata.ts";
 export { encodePathParam } from "./path.ts";
 export type { OpenApiRestOperationConfig } from "./runtime/operation.ts";
