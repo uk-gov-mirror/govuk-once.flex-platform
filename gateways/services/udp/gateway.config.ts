@@ -1,8 +1,6 @@
 import { defineGateway } from "@repo/gateway-config";
 import { noAuth, openapiRest } from "@repo/gateway-driver-openapi-rest";
 
-import getIdentityExchange from "./handlers/get-identity-exchange.ts";
-
 export default defineGateway({
   id: "udp",
   description: "User Data Platform gateway",
@@ -21,7 +19,6 @@ export default defineGateway({
       description: "Look up a linked identity record for a different service",
       upstream: "GET /v1/identity/exchange",
       parameters: { subjectId: { in: "query" } },
-      handler: getIdentityExchange,
     },
   },
 });
