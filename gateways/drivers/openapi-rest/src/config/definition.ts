@@ -16,8 +16,9 @@ import { checkOperationSchemas } from "./check.ts";
 // Behaviour lives here, reviewed with the gateway. Deployment values such as the target and
 // the secret arrive as executor options instead.
 export interface OpenApiRestDriverConfig {
-  // Location of the OpenAPI document describing the upstream. Recorded so the contract can be
-  // reviewed alongside the gateway; nothing fetches it at runtime.
+  // Location of the OpenAPI document describing the upstream: an https URL, or a path within
+  // the gateway's directory. The gateway's schemas are derived from it when someone runs
+  // `gateway-schemas`; nothing fetches it at runtime or when generating.
   readonly spec: string;
   // Static headers sent on every request, such as an API version.
   readonly headers?: Readonly<Record<string, string>>;
@@ -28,6 +29,9 @@ export interface OpenApiRestDriverConfig {
   // it owns. Required, so a gateway that sends no credential says so.
   readonly auth: OpenApiRestAuth;
 }
+
+// This package's own export of what derives a gateway's schemas from `spec`.
+const DERIVE_MODULE = "@repo/gateway-driver-openapi-rest/derive";
 
 export type UpstreamTemplate = `${HttpMethod} /${string}`;
 
@@ -75,6 +79,9 @@ export function openapiRest(
     // Build-time only, so it is imported statically: nothing here reaches the network, a
     // secret or the environment.
     checkSchemas: checkOperationSchemas,
+    // Named, never imported: what it needs to read an OpenAPI document must not follow this
+    // module into a deployed gateway, and the bundler follows every import it can see.
+    deriveSchemasModule: DERIVE_MODULE,
     spec: config.spec,
     auth: config.auth,
     ...(config.headers !== undefined ? { headers: config.headers } : {}),

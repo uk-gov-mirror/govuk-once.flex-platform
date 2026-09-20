@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 import type { HandlerOf, OperationFields } from "@repo/gateway-config";
 import { defineGateway } from "@repo/gateway-config";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -23,9 +25,25 @@ describe("openapiRest", () => {
       "type",
       "createExecutor",
       "checkSchemas",
+      "deriveSchemasModule",
       "spec",
       "auth",
     ]);
+  });
+
+  it("names the module that derives its schemas, which is this package's own export", () => {
+    // A name and not an import: what the module needs to read an OpenAPI document must not
+    // follow the definition into a deployed gateway.
+    const { deriveSchemasModule } = openapiRest({ spec: SPEC, auth: AUTH });
+
+    expect(deriveSchemasModule).toBe(
+      "@repo/gateway-driver-openapi-rest/derive",
+    );
+    expect(
+      createRequire(import.meta.url)
+        .resolve(deriveSchemasModule ?? "")
+        .endsWith("/src/derive/index.ts"),
+    ).toBe(true);
   });
 
   it("carries headers and the response limit when given", () => {
@@ -46,6 +64,7 @@ describe("openapiRest", () => {
       "type",
       "createExecutor",
       "checkSchemas",
+      "deriveSchemasModule",
       "spec",
       "auth",
       "headers",
