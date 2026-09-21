@@ -742,6 +742,69 @@ Only the operations the configuration declares are derived, each found by its `u
 and path; an `operationId` is not used, since a document need not have one and one it has need
 not be a name.
 
+A document may serve paths it does not declare, through a template that takes every segment that
+is left, such as `/v1/{resourcePath+}` for a store that keeps whatever it is given under whatever
+path. An operation never takes such a parameter from a caller, which would let one operation
+reach any other's endpoint past its schemas and its bindings. It names its path in full and says
+which template serves it:
+
+```ts
+getNotificationPreferences: {
+  upstream: "GET /v1/notifications",
+  matches: "/v1/{resourcePath+}",
+  narrow: { outcomes: { ok: { type: "object", properties: { data: NOTIFICATION_PREFERENCES } } } },
+},
+```
+
+`matches` is said, never inferred: a path the document lacks fails deriving unless the operation
+names what serves it, and the failure names the templates that could. Deriving then checks that
+the template exists, that the path fits it, `{name}` taking one segment and `{name+}` one or
+more, all written out, and that no more specific template fits, since that is the one the
+upstream would route to; and it refuses `matches` on a path the document does declare. A path
+with parameters of its own is held to that too: the upstream routes on the value a caller sends,
+so `GET /v1/app/{id}` reaches `/v1/app/admin` where the document declares one, and would be
+answered by that endpoint while held to schemas derived from the template. Deriving refuses it
+unless the document says the parameter cannot be that text — a list of values it may take, say.
+Text is read one way throughout: a template writes its segments as they go into a URL, so `é` and
+`%C3%A9` are one segment, and a value of `admin panel` is one that reaches `/v1/admin%20panel`.
+A parameter is where a request puts one, which is the reading the runtime uses: `{id}.json` is a
+parameter and text, and reaches `/v1/admin.json`. Fitting a path through such a segment is
+refused, since what of it the path fills and what it keeps is neither one thing nor the other.
+What the path fills of the template needs no input field: no caller supplies it, and the text it
+writes is held to the document's schema for that parameter by the validators themselves, on the
+same dialect and formats a gateway's are generated with: a segment is text, what it stands for
+may be a number or a flag, and every reading of it is offered, so `/things/42` fills a parameter
+of integers, `/things/a%20b` one whose values include `a b`, and a fixed identifier is written
+out and held to its `format`. A number is only offered where the machine can hold what the text
+says: four hundred digits are the text they are, not the infinity they would round to. A schema
+saying something the check cannot apply, such as a `format` nothing implements, refuses the value
+rather than admitting it on the rest, since what is left unapplied is what the upstream will hold
+it to; one that would be checked asynchronously is refused rather than run, since an answer that
+arrives later is not an answer here, and generation never sees this schema, the parameter having
+left the input by then. No validator sees that text at a request, since the parameter has left the input by the
+time one runs. An ordinary parameter can be filled the same way, `GET /v1/identity/app/{id}`
+against `/v1/identity/{serviceName}/{identifier}`, and one the path keeps goes by the path's name
+for it.
+The request is sent to the path in `upstream` either way; only deriving reads `matches`.
+
+Such a template describes data of any shape, so `narrow` states the shape a gateway's own services
+keep there: `payload` for the request body, and `outcomes` by name. It can make a schema admit
+less and nothing else. Where the document says "an object of any shape", what is stated takes its
+place, where that object admits objects and nothing else — one that also admits null would admit
+what the document did not. Where the document describes an object, what is stated of a field is
+set into it, a field may be required or the object closed, and a field the document's object has
+no room for is refused; a field the document held through `additionalProperties`, as a dictionary
+does, keeps what held it, since declaring a field exempts it from that. Anything else is set
+beside what the document says as an `allOf`, which holds both whatever they say. A narrowed body is used as written, so it is as strict as it is written to be. A narrowed
+outcome is held to its shape like any other, open to fields and values it does not list and with
+no bounds, because what one of a gateway's own services comes to keep there should fail no other's
+read of it. A narrowing is read in full before any of it is set into a schema: its shape, so a
+keyword written as something other than what it takes is refused rather than filtered out on the
+way and lost; the names it may not use; and a `$ref`, which has nothing to refer to. Where a
+schema goes is the same reading used wherever one is walked, so a `$ref` inside an `allOf` is
+found as surely as one at the top, a field may be called `$ref` or `properties` and is the field
+it is, and `true` and `false` are the schemas they are.
+
 | From the document | In the gateway's schemas |
 |---|---|
 | A parameter the operation's `parameters` map | An input field under the configuration's name for it, with the parameter's schema and, where the schema has none, its description. Headers are matched without regard to case. |

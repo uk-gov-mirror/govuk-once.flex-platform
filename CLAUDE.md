@@ -302,6 +302,15 @@ integrations are implemented.
     looser cannot be undone. The contract's types stay closed either way, so nothing suggests
     fields a caller's version does not declare.
 
+15. **No caller chooses an upstream path.** A path parameter is one segment, and the driver
+    refuses a value that holds a "/". A template that takes the rest of a path, `{name+}`, is
+    reached only by an operation that writes its path out in full and names the template as its
+    `matches`; deriving fails for a path the document lacks otherwise, and refuses a path a more
+    specific template would be routed to. A parameter a caller could fill with several segments
+    would let one operation reach every other's endpoint past its input schema, its `secure`
+    bindings and its logging. What such a template leaves unsaid, the operation states as
+    `narrow`, which can only make a schema admit less.
+
 ## Public documentation and comments
 
 Describe implemented behaviour and the rationale needed to maintain it. Include proposed changes
