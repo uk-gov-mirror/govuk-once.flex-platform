@@ -1,6 +1,9 @@
 import { defineGateway } from "@repo/gateway-config";
 import { noAuth, openapiRest } from "@repo/gateway-driver-openapi-rest";
 
+import { DATA_STORE, stored } from "./config/data-store.ts";
+import { GROUP_SUBSCRIPTIONS } from "./config/groups.ts";
+import { NOTIFICATION_PREFERENCES } from "./config/notifications.ts";
 import { REQUESTING } from "./config/requesting.ts";
 
 export default defineGateway({
@@ -16,7 +19,10 @@ export default defineGateway({
     auth: noAuth(),
   }),
   // Every operation UDP describes under a path of its own, under the upstream's own names for
-  // what they take.
+  // what they take; and then what Flex keeps in UDP's data store, which UDP describes once for
+  // any path, "/v1/{resourcePath+}", and any shape. Each of those names its path in full, says
+  // that the template serves it, and states the shape Flex keeps there, which is Flex's and not
+  // UDP's to describe. No caller chooses a path: what can be reached is what is written here.
   operations: {
     createUser: {
       description: "Create User Record",
@@ -71,6 +77,46 @@ export default defineGateway({
       description: "Start a SAR Request",
       upstream: "POST /v1/sar",
       parameters: REQUESTING,
+    },
+    getNotificationPreferences: {
+      description: "Read a user's notification preferences",
+      upstream: "GET /v1/notifications",
+      matches: DATA_STORE,
+      parameters: REQUESTING,
+      narrow: { outcomes: { ok: stored(NOTIFICATION_PREFERENCES) } },
+    },
+    updateNotificationPreferences: {
+      description: "Create or replace a user's notification preferences",
+      upstream: "POST /v1/notifications",
+      matches: DATA_STORE,
+      parameters: REQUESTING,
+      narrow: {
+        payload: stored(NOTIFICATION_PREFERENCES),
+        outcomes: { ok: stored(NOTIFICATION_PREFERENCES) },
+      },
+    },
+    deleteNotificationPreferences: {
+      description: "Delete a user's notification preferences",
+      upstream: "DELETE /v1/notifications",
+      matches: DATA_STORE,
+      parameters: REQUESTING,
+    },
+    getGroupSubscriptions: {
+      description: "Read the groups a user is subscribed to",
+      upstream: "GET /v1/groups",
+      matches: DATA_STORE,
+      parameters: REQUESTING,
+      narrow: { outcomes: { ok: stored(GROUP_SUBSCRIPTIONS) } },
+    },
+    updateGroupSubscriptions: {
+      description: "Replace the groups a user is subscribed to",
+      upstream: "POST /v1/groups",
+      matches: DATA_STORE,
+      parameters: REQUESTING,
+      narrow: {
+        payload: stored(GROUP_SUBSCRIPTIONS),
+        outcomes: { ok: stored(GROUP_SUBSCRIPTIONS) },
+      },
     },
     getSarStatus: {
       description: "Get SAR Status",
