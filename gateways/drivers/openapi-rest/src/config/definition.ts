@@ -4,6 +4,7 @@ import type {
   ExecutorOptions,
   GatewayConfig,
 } from "@repo/gateway-config";
+import type { JSONSchema } from "@repo/gateway-types";
 
 import type { MetadataConfig } from "../metadata.ts";
 import {
@@ -51,9 +52,30 @@ export interface ParameterMapping {
 // declares that per field: a path parameter, a query parameter or a header. Every path
 // parameter in the template needs an entry. The request body, when there is one, travels under
 // the top-level `payload` field.
+// What an operation says about its schemas that the upstream's document cannot. Each is set
+// beside what the document says, as a second part of an `allOf`, so it can make a schema admit
+// less and never more or other than the upstream describes.
+export interface OperationNarrowing {
+  // The request body, where the document types it no further than "an object".
+  readonly payload?: JSONSchema;
+  // An outcome's data, by the outcome's name.
+  readonly outcomes?: Readonly<Record<string, JSONSchema>>;
+}
+
 export type OpenApiRestOperationFields = {
   readonly upstream: UpstreamTemplate;
   readonly parameters?: Readonly<Record<string, ParameterMapping>>;
+  // The path template of the upstream's document that serves this operation's path, where the
+  // document does not declare the path itself: "/v1/{resourcePath+}" for "GET /v1/notifications".
+  // Said, never inferred. A template that takes any path serves one the document has not
+  // described, so nothing in the document says what this operation sends or gets back; an
+  // operation that goes through one does so because someone wrote that it should, and deriving
+  // fails for a path the document lacks and no `matches` accounts for. The request is sent to
+  // the path in `upstream` either way; only deriving reads this.
+  readonly matches?: `/${string}`;
+  // What such a template leaves unsaid. It holds data of any shape, so the shape a gateway's
+  // own services keep there is theirs to state.
+  readonly narrow?: OperationNarrowing;
 };
 
 export interface OpenApiRestDriver

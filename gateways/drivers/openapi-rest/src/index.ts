@@ -17,6 +17,7 @@ export type {
   OpenApiRestDriver,
   OpenApiRestDriverConfig,
   OpenApiRestOperationFields,
+  OperationNarrowing,
   ParameterMapping,
   UpstreamTemplate,
 } from "./config/definition.ts";
