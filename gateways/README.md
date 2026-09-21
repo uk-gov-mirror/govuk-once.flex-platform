@@ -75,8 +75,13 @@ export default defineGateway({
     getIdentityExchange: {
       description: "Look up a linked identity record for a different service",
       upstream: "GET /v1/identity/exchange",
-      parameters: { subjectId: { in: "query" } },
+      parameters: {
+        requiredService: { in: "query" },
+        requestingService: { in: "header", name: "requesting-service" },
+        requestingServiceUserId: { in: "header", name: "requesting-service-user-id" },
+      },
     },
+    // …and each of UDP's other operations.
   },
 });
 ```
@@ -427,11 +432,11 @@ and an outcome the gateway does not declare is a type error.
 ```ts
 import type { GetIdentityExchangeResponse } from "./.gen/client/rpc.ts";
 
-export function linkedId(response: GetIdentityExchangeResponse): string {
+export function serviceId(response: GetIdentityExchangeResponse): string {
   if (!response.ok) throw new Error(response.error.code);
   switch (response.outcome) {
     case "ok":
-      return response.data.linkedId;
+      return response.data.serviceId;
   }
 }
 ```
@@ -983,7 +988,13 @@ the operation's schemas then declare alongside `ok`:
 ```ts
 import { defineHandler } from "@repo/gateway-driver-openapi-rest";
 
-export default defineHandler(async (input: { subjectId: string }, client) => {
+interface IdentityExchangeInput {
+  requiredService: string;
+  requestingService: string;
+  requestingServiceUserId: string;
+}
+
+export default defineHandler(async (input: IdentityExchangeInput, client) => {
   const response = await client.request(client.prepare(input));
   if (response.status === 404) {
     return { outcome: "unlinked", data: null };
