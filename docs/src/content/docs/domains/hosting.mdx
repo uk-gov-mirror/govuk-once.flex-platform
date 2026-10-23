@@ -1,6 +1,6 @@
 ---
 title: Hosting a domain
-description: How a domain is declared in config, where its function runs, and what the platform provides around it.
+description: How a domain is declared in config, what each domain account provides, and what the platform provides around a domain's function.
 ---
 
 import { Aside } from "@astrojs/starlight/components";
@@ -8,8 +8,9 @@ import { Aside } from "@astrojs/starlight/components";
 A domain is hosted from a line of the platform's config. Domain teams write the domain's code and
 never write CDK. The platform provides everything the code runs with and behind.
 
-The config and its checks are in `infra/app`, and the names they use are in `domains/infra`
-(`@repo/domain-infra`). Nothing deploys a domain. Each part of this page that is planned says so.
+The config and its checks are in `infra/app`. The constructs and the names they use are in
+`domains/infra` (`@repo/domain-infra`). No stack in the app creates them, so nothing deploys a
+domain. Each part of this page that is planned says so.
 
 ## Declaring a domain
 
