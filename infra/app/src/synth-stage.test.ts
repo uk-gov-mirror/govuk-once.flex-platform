@@ -33,7 +33,10 @@ describe("synthStage", () => {
     const app = cdkApp({ stage: prod.name, target: "dev" });
     synthStage(app, FIXTURE_STAGES);
     expect(app.synth().stacks.map((stack) => stack.stackName)).toEqual([
+      "domain-dev-main",
       "frontdoor-dev-edge-logs-eu-west-2",
+      "domain-dev-domain-a",
+      "domain-dev-domain-b",
       "frontdoor-dev",
     ]);
 

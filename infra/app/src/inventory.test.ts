@@ -8,6 +8,8 @@ import { selectTarget } from "./config/select-target.ts";
 import { STAGES } from "./config/stages.ts";
 import type { EnvironmentConfig, StageConfig } from "./config/types.ts";
 import { inventory, type StackInventory } from "./inventory.ts";
+import { domainStackName } from "./stacks/domain.ts";
+import { domainAccountStackName } from "./stacks/domain-account.ts";
 
 // A version's logical ID carries its code's hash, and Lambda@Edge's code bakes in each
 // environment's issuers, so it changes with any change to either. A new version replacing the
@@ -27,37 +29,91 @@ function synthesized(stage: StageConfig): StackInventory[] {
   return withoutVersions(inventory(app.synth()));
 }
 
-// An environment's stacks, with its name and accounts replaced by what they stand for.
-function environmentShape(
+// An environment's stacks by kind, each with the names and accounts config gave it replaced by
+// what they stand for. Environments host different domains in different accounts, so each kind is
+// compared with its own kind.
+function environmentShapes(
   stacks: readonly StackInventory[],
   environment: EnvironmentConfig,
 ) {
-  const accounts = new Map([
-    [environment.frontdoor.account, "{frontdoor}"],
-    ...environment.domainAccounts.map(
-      (domain) => [domain.account, `{domain:${domain.name}}`] as const,
-    ),
-  ]);
+  const byName = new Map(stacks.map((stack) => [stack.name, stack]));
+
+  const stack = (name: string) => {
+    const found = byName.get(name);
+
+    if (found === undefined) throw new Error(`No stack named ${name}`);
+
+    return found;
+  };
+
   // Stack names are {section}-{environment}, then any -{thing} and -{region}. Environment names
   // are platform names, so they hold nothing a regular expression reads specially.
   const environmentName = new RegExp(`^([a-z0-9]+)-${environment.name}(?=-|$)`);
   const named = (name: string) =>
     name.replace(environmentName, "$1-{environment}");
-  const shapes = new Map(
-    stacks
-      .filter((stack) => accounts.has(stack.account))
-      .map((stack) => [
-        named(stack.name),
-        {
-          ...stack,
-          name: named(stack.name),
-          account: accounts.get(stack.account),
-          dependencies: stack.dependencies.map(named),
-        },
-      ]),
+
+  const frontdoorStacks = stacks.filter(
+    ({ account }) => account === environment.frontdoor.account,
   );
-  // Re-sorted: replacing the name can change where a stack sorts.
-  return sortedNames(shapes.keys()).map((name) => shapes.get(name));
+
+  const frontdoorNames = new Set(frontdoorStacks.map(({ name }) => name));
+
+  const frontdoor = new Map(
+    frontdoorStacks.map((frontdoorStack) => [
+      named(frontdoorStack.name),
+      {
+        ...frontdoorStack,
+        name: named(frontdoorStack.name),
+        account: "{frontdoor}",
+        // Which domains it waits for is config, not shape.
+        dependencies: frontdoorStack.dependencies
+          .filter((name) => frontdoorNames.has(name))
+          .map(named),
+      },
+    ]),
+  );
+
+  const accounts = environment.domainAccounts.map((domainAccount) => ({
+    ...stack(domainAccountStackName(environment, domainAccount)),
+    name: "domain-{environment}-{account}",
+    account: "{domain account}",
+  }));
+
+  // CDK ends an API's deployment ID with a hash of the API, so a new deployment replaces the old one
+  // whenever it changes. Each domain's API differs, so the hash does too.
+  const withoutDeploymentHash = (resources: StackInventory["resources"]) =>
+    resources.map((resource) =>
+      resource.type === "AWS::ApiGateway::Deployment"
+        ? {
+            ...resource,
+            logicalId: resource.logicalId.replace(/[0-9a-f]{32}$/, ""),
+          }
+        : resource,
+    );
+
+  const domains = environment.domainAccounts.flatMap((domainAccount) =>
+    domainAccount.domains.map((domain) => {
+      const accountStack = domainAccountStackName(environment, domainAccount);
+      const domainStack = stack(domainStackName(environment, domain));
+
+      return {
+        ...domainStack,
+        name: "domain-{environment}-{domain}",
+        account: "{domain account}",
+        resources: withoutDeploymentHash(domainStack.resources),
+        dependencies: domainStack.dependencies.map((name) =>
+          name === accountStack ? "domain-{environment}-{account}" : name,
+        ),
+      };
+    }),
+  );
+
+  return {
+    // Re-sorted: replacing the name can change where a stack sorts.
+    frontdoor: sortedNames(frontdoor.keys()).map((name) => frontdoor.get(name)),
+    accounts,
+    domains,
+  };
 }
 
 describe("inventory", () => {
@@ -67,17 +123,27 @@ describe("inventory", () => {
     ["the fixture stages", FIXTURE_STAGES],
     ["the committed stages", STAGES],
   ] as const)(
-    "is the same for every environment in %s, names and accounts aside",
+    "builds each kind of stack the same in every environment in %s, names and accounts aside",
     (_, stages) => {
       const shapes = stages.flatMap((stage) => {
         const stacks = withoutVersions(inventory(synthesizedStage(stage)));
+
         return stage.environments.map((environment) =>
-          environmentShape(stacks, environment),
+          environmentShapes(stacks, environment),
         );
       });
 
-      expect(shapes[0]).not.toHaveLength(0);
-      for (const shape of shapes) expect(shape).toEqual(shapes[0]);
+      const frontdoors = shapes.map(({ frontdoor }) => frontdoor);
+      const accounts = shapes.flatMap(({ accounts }) => accounts);
+      const domains = shapes.flatMap(({ domains }) => domains);
+
+      expect(frontdoors[0]).not.toHaveLength(0);
+      expect(accounts).not.toHaveLength(0);
+      expect(domains).not.toHaveLength(0);
+
+      for (const kind of [frontdoors, accounts, domains]) {
+        for (const shape of kind) expect(shape).toEqual(kind[0]);
+      }
     },
   );
 
@@ -118,7 +184,12 @@ describe("inventory", () => {
       ...stage,
       environments: stage.environments.toReversed().map((environment) => ({
         ...environment,
-        domainAccounts: environment.domainAccounts.toReversed(),
+        domainAccounts: environment.domainAccounts
+          .toReversed()
+          .map((domainAccount) => ({
+            ...domainAccount,
+            domains: domainAccount.domains.toReversed(),
+          })),
         frontdoor: {
           ...environment.frontdoor,
           issuers: issuers.toReversed().map((issuer) => ({

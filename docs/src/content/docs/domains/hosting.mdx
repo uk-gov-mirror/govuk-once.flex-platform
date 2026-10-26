@@ -8,9 +8,10 @@ import { Aside } from "@astrojs/starlight/components";
 A domain is hosted from a line of the platform's config. Domain teams write the domain's code and
 never write CDK. The platform provides everything the code runs with and behind.
 
-The config and its checks are in `infra/app`. The constructs and the names they use are in
-`domains/infra` (`@repo/domain-infra`). No stack in the app creates them, so nothing deploys a
-domain. Each part of this page that is planned says so.
+The config, its checks and the stacks are in `infra/app`, with a
+[stack](/flex-platform/infrastructure/overview/#stacks) for every domain account and every
+domain. The constructs and the names they use are in `domains/infra` (`@repo/domain-infra`). Each
+part of this page that is planned says so.
 
 ## Declaring a domain
 
@@ -51,6 +52,8 @@ Before building any stage, the app checks every domain:
   ending with a hyphen;
 - its name is used once in its environment, across all of the environment's domain accounts,
   since the Frontdoor routes by name alone;
+- its name is not one of its environment's domain accounts' names, since a domain's stack is
+  `domain-<environment>-<domain>` and an account's is `domain-<environment>-<account>`;
 - its function's name, `domain-<environment>-<name>`, is within Lambda's 64 characters. Each name
   is within 32 alone, but the two together can pass it.
 

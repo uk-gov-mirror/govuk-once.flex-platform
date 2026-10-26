@@ -1,9 +1,160 @@
 [
   {
+    "name": "domain-development-domain00",
+    "account": "098640806149",
+    "region": "eu-west-2",
+    "dependencies": [],
+    "resources": [
+      {
+        "logicalId": "DomainAccountApiGatewayAccount86E8C022",
+        "type": "AWS::ApiGateway::Account"
+      },
+      {
+        "logicalId": "DomainAccountApiGatewayLogsRole9F4EBDB3",
+        "type": "AWS::IAM::Role"
+      },
+      {
+        "logicalId": "DomainAccountCaa8B1773B0",
+        "type": "AWS::Route53::RecordSet"
+      },
+      {
+        "logicalId": "DomainAccountCertificateArnADE847C8",
+        "type": "AWS::SSM::Parameter"
+      },
+      {
+        "logicalId": "DomainAccountCertificateE870B3E2",
+        "type": "AWS::CertificateManager::Certificate"
+      },
+      {
+        "logicalId": "DomainAccountDeployRole3C741C0C",
+        "type": "AWS::IAM::Role"
+      },
+      {
+        "logicalId": "DomainAccountExecutionBoundaryF61AF2E1",
+        "type": "AWS::IAM::ManagedPolicy"
+      },
+      {
+        "logicalId": "DomainAccountExecutionRole729C855F",
+        "type": "AWS::IAM::Role"
+      },
+      {
+        "logicalId": "DomainAccountFunctionLogsLogGroup29A4E399",
+        "type": "AWS::Logs::LogGroup"
+      },
+      {
+        "logicalId": "DomainAccountIntegrationRoleDAD02702",
+        "type": "AWS::IAM::Role"
+      },
+      {
+        "logicalId": "DomainAccountSecurityGroup1BD9900F",
+        "type": "AWS::EC2::SecurityGroup"
+      },
+      {
+        "logicalId": "DomainAccountSecurityGroupIdA2FDEBD0",
+        "type": "AWS::SSM::Parameter"
+      },
+      {
+        "logicalId": "LogGroupKeyD49CF390",
+        "type": "AWS::KMS::Key"
+      }
+    ]
+  },
+  {
+    "name": "domain-development-example",
+    "account": "098640806149",
+    "region": "eu-west-2",
+    "dependencies": [
+      "domain-development-domain00"
+    ],
+    "resources": [
+      {
+        "logicalId": "DomainAccessLogsLogGroup492C5CEA",
+        "type": "AWS::Logs::LogGroup"
+      },
+      {
+        "logicalId": "DomainAliasEBA855DE",
+        "type": "AWS::Route53::RecordSet"
+      },
+      {
+        "logicalId": "DomainApi505A06DA",
+        "type": "AWS::ApiGateway::RestApi"
+      },
+      {
+        "logicalId": "DomainApiACCESSDENIEDF89246A2",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiANY739491DC",
+        "type": "AWS::ApiGateway::Method"
+      },
+      {
+        "logicalId": "DomainApiDEFAULT4XX1DD328B8",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiDEFAULT5XXF2DFFA7F",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiDeployment33015D015ceb815556ee9be55206839460e16583",
+        "type": "AWS::ApiGateway::Deployment"
+      },
+      {
+        "logicalId": "DomainApiDeploymentStagedefault2582480F",
+        "type": "AWS::ApiGateway::Stage"
+      },
+      {
+        "logicalId": "DomainApiEXPIREDTOKENB0124361",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiINVALIDSIGNATURE76A649CF",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiMISSINGAUTHENTICATIONTOKEN64D51E48",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiTHROTTLED4A3B4782",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiUNAUTHORIZEDADA41E6A",
+        "type": "AWS::ApiGateway::GatewayResponse"
+      },
+      {
+        "logicalId": "DomainApiproxyANY01B64767",
+        "type": "AWS::ApiGateway::Method"
+      },
+      {
+        "logicalId": "DomainApiproxyDE0E0752",
+        "type": "AWS::ApiGateway::Resource"
+      },
+      {
+        "logicalId": "DomainBasePathMapping6637F529",
+        "type": "AWS::ApiGateway::BasePathMapping"
+      },
+      {
+        "logicalId": "DomainDomainName988E44EF",
+        "type": "AWS::ApiGateway::DomainName"
+      },
+      {
+        "logicalId": "DomainExecutionLogsLogGroupD8ABA14F",
+        "type": "AWS::Logs::LogGroup"
+      },
+      {
+        "logicalId": "LogGroupKeyD49CF390",
+        "type": "AWS::KMS::Key"
+      }
+    ]
+  },
+  {
     "name": "frontdoor-development",
     "account": "553915472156",
     "region": "us-east-1",
     "dependencies": [
+      "domain-development-example",
       "frontdoor-development-edge-logs-eu-west-2"
     ],
     "resources": [

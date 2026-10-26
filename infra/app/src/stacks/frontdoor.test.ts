@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 import { FIXTURE_STAGES, synthesizedStage } from "../../test/helpers.ts";
 import { buildApp } from "../build-app.ts";
 import { selectTarget } from "../config/select-target.ts";
-import { FrontdoorStack, frontdoorStackName } from "./frontdoor.ts";
+import {
+  domainRoutes,
+  FrontdoorStack,
+  frontdoorStackName,
+} from "./frontdoor.ts";
 
 const PROD = FIXTURE_STAGES[2];
 const [DEV] = PROD.environments;
@@ -76,9 +80,39 @@ describe("FrontdoorStack", () => {
     buildApp(app, PROD, selectTarget(PROD, "staging"));
 
     expect(app.synth().stacks.map((stack) => stack.stackName)).toEqual([
+      "domain-staging-main",
       "frontdoor-staging-edge-logs-eu-west-2",
+      "domain-staging-domain-a",
+      "domain-staging-domain-b",
       "frontdoor-staging",
     ]);
+  });
+
+  it("routes each domain the environment hosts to its host, whichever account and order config lists it in", () => {
+    const environment = PROD.environments[2];
+
+    if (environment === undefined) throw new Error("No prod environment");
+
+    const [main, second] = environment.domainAccounts;
+
+    if (main === undefined || second === undefined) {
+      throw new Error("Fewer than two domain accounts");
+    }
+
+    const listed = {
+      ...environment,
+      domainAccounts: [
+        { ...main, domains: ["domain-b"] },
+        { ...second, domains: ["domain-a"] },
+      ],
+    };
+    const routes = domainRoutes(listed);
+
+    expect(routes).toEqual({
+      "domain-a": `domain-a.${second.zone.name}`,
+      "domain-b": `domain-b.${main.zone.name}`,
+    });
+    expect(Object.keys(routes)).toEqual(["domain-a", "domain-b"]);
   });
 
   it("names its stack from the environment alone, so stages compare directly", () => {

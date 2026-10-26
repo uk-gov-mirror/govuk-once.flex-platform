@@ -4,6 +4,7 @@ import {
   AccessLogField,
   AccessLogFormat,
   AuthorizationType,
+  BasePathMapping,
   DomainName,
   EndpointAccessMode,
   EndpointType,
@@ -295,7 +296,12 @@ export class Domain extends Construct {
       endpointAccessMode: EndpointAccessMode.STRICT,
     });
 
-    domainName.addBasePathMapping(api, { stage: api.deploymentStage });
+    // Manually created as `addBasePathMapping` takes its ID from the API's path, stack name included.
+    new BasePathMapping(this, "BasePathMapping", {
+      domainName,
+      restApi: api,
+      stage: api.deploymentStage,
+    });
 
     // Only CloudFront reaches this host, and it does so over IPv4.
     new ARecord(this, "Alias", {
