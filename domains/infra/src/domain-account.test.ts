@@ -53,6 +53,7 @@ const EXECUTION_STATEMENTS = [
 
 function roleNamed(roleName: string) {
   const { template } = domainAccountTemplate();
+
   const roles = template.findResources("AWS::IAM::Role", {
     Properties: { RoleName: roleName },
   });
@@ -66,6 +67,17 @@ function roleNamed(roleName: string) {
       PermissionsBoundary?: unknown;
     },
   };
+}
+
+// Synth stays offline, so each SSM value is a CloudFormation parameter resolved at deploy.
+function parameterId(name: string): string | undefined {
+  const parameters = domainAccountTemplate().template.toJSON()
+    .Parameters as Record<string, { Default: string }>;
+  const [id] = Object.entries(parameters).find(
+    ([, parameter]) => parameter.Default === name,
+  ) ?? [undefined];
+
+  return id;
 }
 
 describe("DomainAccount", () => {
@@ -127,22 +139,9 @@ describe("DomainAccount", () => {
   });
 
   describe("the security group", () => {
-    // Synth stays offline, so each SSM value is a CloudFormation parameter resolved at deploy.
-    function parameterFor(name: string) {
-      const { template } = domainAccountTemplate();
-      const parameters = template.toJSON().Parameters as Record<
-        string,
-        { Type: string; Default: string }
-      >;
-      const [id] = Object.entries(parameters).find(
-        ([, parameter]) => parameter.Default === name,
-      ) ?? [undefined];
-
-      return { template, id };
-    }
-
     it("is created in the VPC named in SSM, letting nothing in", () => {
-      const { template, id } = parameterFor("/flex/network/sandbox/vpc-id");
+      const { template } = domainAccountTemplate();
+      const id = parameterId("/flex/network/sandbox/vpc-id");
 
       expect(id).toBeDefined();
       template.resourceCountIs("AWS::EC2::SecurityGroup", 1);
@@ -154,7 +153,8 @@ describe("DomainAccount", () => {
     });
 
     it("may reach only the VPC's Lambda endpoint, over HTTPS", () => {
-      const { template, id } = parameterFor(
+      const { template } = domainAccountTemplate();
+      const id = parameterId(
         "/flex/network/sandbox/lambda-endpoint-security-group-id",
       );
 
@@ -263,6 +263,133 @@ describe("DomainAccount", () => {
           Resource: `arn:aws:lambda:${ARN}:function:domain-sandbox-*:live`,
         },
       ]);
+    });
+  });
+
+  describe("the deploy role", () => {
+    const DOMAIN_FUNCTIONS = `arn:aws:lambda:${ARN}:function:domain-sandbox-*`;
+    const PLACED = [
+      "lambda:CreateFunction",
+      "lambda:UpdateFunctionConfiguration",
+    ];
+
+    function deployStatements() {
+      const { role } = roleNamed("domain-sandbox-deploy");
+
+      expect(role.Policies).toHaveLength(1);
+
+      return role.Policies[0]?.PolicyDocument.Statement ?? [];
+    }
+
+    it("is assumed only by principals in its own account, with a fixed name", () => {
+      const { role } = roleNamed("domain-sandbox-deploy");
+
+      expect(role.AssumeRolePolicyDocument).toEqual({
+        Statement: [
+          {
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: { AWS: `arn:aws:iam::${ACCOUNT}:root` },
+          },
+        ],
+        Version: "2012-10-17",
+      });
+    });
+
+    it("may create, configure, release and read the environment's domain functions", () => {
+      expect(deployStatements()[0]).toEqual({
+        Action: [
+          "lambda:CreateAlias",
+          "lambda:CreateFunction",
+          "lambda:DeleteFunction",
+          "lambda:GetAlias",
+          "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
+          "lambda:PublishVersion",
+          "lambda:UpdateAlias",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+        ],
+        Effect: "Allow",
+        Resource: DOMAIN_FUNCTIONS,
+      });
+    });
+
+    it("may describe the network Lambda checks a function's placement against", () => {
+      expect(deployStatements()[1]).toEqual({
+        Action: [
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
+          "ec2:GetSecurityGroupsForVpc",
+        ],
+        Effect: "Allow",
+        Resource: "*",
+      });
+    });
+
+    it("may pass only the execution role, and only to Lambda", () => {
+      expect(deployStatements()[2]).toMatchObject({
+        Action: "iam:PassRole",
+        Effect: "Allow",
+        Resource: {
+          "Fn::GetAtt": [expect.stringMatching(/ExecutionRole/), "Arn"],
+        },
+        Condition: {
+          StringEquals: { "iam:PassedToService": "lambda.amazonaws.com" },
+        },
+      });
+    });
+
+    it("can never touch a gateway", () => {
+      expect(deployStatements()[3]).toEqual({
+        Action: "lambda:*",
+        Effect: "Deny",
+        Resource: `arn:aws:lambda:${ARN}:function:gateway-*`,
+      });
+    });
+
+    it("refuses any domain function outside the isolated subnets and the domain security group", () => {
+      const placement = (Condition: unknown) => ({
+        Action: PLACED,
+        Condition,
+        Effect: "Deny",
+        Resource: DOMAIN_FUNCTIONS,
+      });
+
+      expect(deployStatements().slice(4)).toEqual([
+        placement({ Null: { "lambda:VpcIds": "true" } }),
+        placement({
+          "ForAnyValue:StringNotEquals": {
+            "lambda:VpcIds": [
+              { Ref: parameterId("/flex/network/sandbox/vpc-id") },
+            ],
+          },
+        }),
+        placement({
+          "ForAnyValue:StringNotEquals": {
+            "lambda:SubnetIds": {
+              Ref: parameterId("/flex/network/sandbox/isolated-subnet-ids"),
+            },
+          },
+        }),
+        placement({
+          "ForAnyValue:StringNotEquals": {
+            "lambda:SecurityGroupIds": [
+              {
+                "Fn::GetAtt": [
+                  expect.stringMatching(/SecurityGroup/),
+                  "GroupId",
+                ],
+              },
+            ],
+          },
+        }),
+      ]);
+    });
+
+    it("has nothing else", () => {
+      expect(deployStatements()).toHaveLength(8);
     });
   });
 

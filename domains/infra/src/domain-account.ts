@@ -7,6 +7,7 @@ import {
 } from "aws-cdk-lib/aws-certificatemanager";
 import { CfnSecurityGroup } from "aws-cdk-lib/aws-ec2";
 import {
+  AccountRootPrincipal,
   Effect,
   ManagedPolicy,
   PolicyDocument,
@@ -19,18 +20,20 @@ import {
   HostedZone,
   type HostedZoneAttributes,
 } from "aws-cdk-lib/aws-route53";
-import { StringParameter } from "aws-cdk-lib/aws-ssm";
+import { StringListParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
 
 import {
   apiAccessLogGroupName,
   apiExecutionLogGroupName,
   certificateParameterName,
+  deployRoleName,
   DOMAIN_REGION,
   domainFunctionName,
   executionRoleName,
   functionLogGroupName,
   integrationRoleName,
+  isolatedSubnetIdsParameterName,
   lambdaEndpointSecurityGroupParameterName,
   LIVE_ALIAS,
   securityGroupParameterName,
@@ -63,6 +66,8 @@ export class DomainAccount extends Construct {
   constructor(scope: Construct, id: string, props: DomainAccountProps) {
     super(scope, id);
 
+    const { environment, zone, gatewayFunctions } = props;
+
     const stack = Stack.of(this);
 
     if (stack.region !== DOMAIN_REGION) {
@@ -71,25 +76,37 @@ export class DomainAccount extends Construct {
       );
     }
 
-    this.createCertificate(props);
-    this.createSecurityGroup(props);
+    this.createCertificate(zone, { environment });
 
-    const functionLogGroup = new PlatformLogGroup(this, "FunctionLogs", {
-      logGroupName: functionLogGroupName(props.environment),
+    const securityGroup = this.createSecurityGroup({ environment });
+
+    const logGroup = new PlatformLogGroup(this, "FunctionLogs", {
+      logGroupName: functionLogGroupName(environment),
     });
 
-    this.createIntegrationRole(props);
-    this.createExecutionRole(props, functionLogGroup);
+    this.createIntegrationRole(stack, { environment });
 
-    this.setApiGatewayLogging(props);
+    const executionRole = this.createExecutionRole(stack, {
+      environment,
+      gatewayFunctions,
+      logGroup,
+    });
+
+    this.createDeployRole(stack, {
+      environment,
+      securityGroup,
+      executionRole,
+    });
+
+    this.setApiGatewayLogging(stack, { environment });
   }
 
   // One wildcard for every domain: a certificate for `<domain>.<zone>` would leave a domain's name
   // as few as 18 of ACM's 64 characters.
-  private createCertificate({
-    environment,
-    zone: attributes,
-  }: DomainAccountProps): void {
+  private createCertificate(
+    attributes: HostedZoneAttributes,
+    { environment }: { environment: string },
+  ): void {
     const zone = HostedZone.fromHostedZoneAttributes(this, "Zone", attributes);
 
     const caa = new CaaAmazonRecord(this, "Caa", {
@@ -113,7 +130,11 @@ export class DomainAccount extends Construct {
 
   // Created in a VPC that isn't ours. A domain may reach only the VPC's Lambda endpoint, to invoke
   // gateways. The endpoint's own group must let it in.
-  private createSecurityGroup({ environment }: DomainAccountProps): void {
+  private createSecurityGroup({
+    environment,
+  }: {
+    environment: string;
+  }): CfnSecurityGroup {
     const securityGroup = new CfnSecurityGroup(this, "SecurityGroup", {
       groupDescription: `Domain functions in ${environment}`,
       vpcId: StringParameter.valueForStringParameter(
@@ -138,13 +159,16 @@ export class DomainAccount extends Construct {
       parameterName: securityGroupParameterName(environment),
       stringValue: securityGroup.attrGroupId,
     });
+
+    return securityGroup;
   }
 
   // API Gateway invokes every domain's function through this one role, so no domain's function
   // needs a resource policy, and one created again under the same name needs nothing added.
-  private createIntegrationRole({ environment }: DomainAccountProps): void {
-    const stack = Stack.of(this);
-
+  private createIntegrationRole(
+    stack: Stack,
+    { environment }: { environment: string },
+  ): void {
     const liveFunctions = stack.formatArn({
       service: "lambda",
       resource: "function",
@@ -180,11 +204,17 @@ export class DomainAccount extends Construct {
   // Every domain has the same permissions, so they run as one role. The boundary holds the same
   // limits, in case the role is ever widened by mistake.
   private createExecutionRole(
-    { environment, gatewayFunctions }: DomainAccountProps,
-    logGroup: PlatformLogGroup,
-  ): void {
-    const stack = Stack.of(this);
-
+    stack: Stack,
+    {
+      environment,
+      gatewayFunctions,
+      logGroup,
+    }: {
+      environment: string;
+      gatewayFunctions: string;
+      logGroup: PlatformLogGroup;
+    },
+  ): Role {
     const gateways = stack.formatArn({
       service: "lambda",
       resource: "function",
@@ -264,13 +294,142 @@ export class DomainAccount extends Construct {
         },
       );
     }
+
+    return role;
+  }
+
+  // Whatever releases a domain's code assumes this role to create, configure and release its
+  // function. It can touch only domain functions, never a gateway, and every function it creates
+  // or configures must be in the isolated subnets with the domain security group.
+  private createDeployRole(
+    stack: Stack,
+    {
+      environment,
+      securityGroup,
+      executionRole,
+    }: {
+      environment: string;
+      securityGroup: CfnSecurityGroup;
+      executionRole: Role;
+    },
+  ): void {
+    const domainFunctions = stack.formatArn({
+      service: "lambda",
+      resource: "function",
+      resourceName: domainFunctionName(environment, "*"),
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+    const everyGateway = stack.formatArn({
+      service: "lambda",
+      resource: "function",
+      resourceName: "gateway-*",
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+
+    const vpcId = StringParameter.valueForStringParameter(
+      this,
+      vpcIdParameterName(environment),
+    );
+    const subnetIds = StringListParameter.valueForTypedListParameter(
+      this,
+      isolatedSubnetIdsParameterName(environment),
+    );
+
+    // A deny holds whatever else is ever allowed. A function with no VPC carries no VPC ID.
+    const placement = (condition: Record<string, unknown>) =>
+      new PolicyStatement({
+        effect: Effect.DENY,
+        actions: [
+          "lambda:CreateFunction",
+          "lambda:UpdateFunctionConfiguration",
+        ],
+        resources: [domainFunctions],
+        conditions: condition,
+      });
+
+    const statements = [
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          "lambda:CreateAlias",
+          "lambda:CreateFunction",
+          "lambda:DeleteFunction",
+          "lambda:GetAlias",
+          "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
+          "lambda:PublishVersion",
+          "lambda:UpdateAlias",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+        ],
+        resources: [domainFunctions],
+      }),
+      // Lambda checks the function's network as the caller.
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
+          "ec2:GetSecurityGroupsForVpc",
+        ],
+        resources: ["*"],
+      }),
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["iam:PassRole"],
+        resources: [executionRole.roleArn],
+        conditions: {
+          StringEquals: { "iam:PassedToService": "lambda.amazonaws.com" },
+        },
+      }),
+      new PolicyStatement({
+        effect: Effect.DENY,
+        actions: ["lambda:*"],
+        resources: [everyGateway],
+      }),
+      placement({ Null: { "lambda:VpcIds": "true" } }),
+      placement({
+        "ForAnyValue:StringNotEquals": { "lambda:VpcIds": [vpcId] },
+      }),
+      placement({
+        "ForAnyValue:StringNotEquals": { "lambda:SubnetIds": subnetIds },
+      }),
+      placement({
+        "ForAnyValue:StringNotEquals": {
+          "lambda:SecurityGroupIds": [securityGroup.attrGroupId],
+        },
+      }),
+    ];
+
+    const role = new Role(this, "DeployRole", {
+      roleName: deployRoleName(environment),
+      assumedBy: new AccountRootPrincipal(),
+      inlinePolicies: {
+        Deploy: new PolicyDocument({ statements }),
+      },
+    });
+
+    Validations.of(role).acknowledge(
+      {
+        id: `AwsSolutions-IAM5[Resource::${domainFunctions}]`,
+        reason:
+          "Each domain's function is created outside CloudFormation under this pattern, by whatever assumes this role.",
+      },
+      {
+        id: "AwsSolutions-IAM5[Resource::*]",
+        reason:
+          "Lambda checks a function's VPC, subnets and security groups as the caller, and these EC2 Describe actions support no resource ARN.",
+      },
+    );
   }
 
   // API Gateway has one logging role per account and region, which every API in it writes as.
   // It creates no log group: each domain's stack creates its own first, encrypted.
-  private setApiGatewayLogging({ environment }: DomainAccountProps): void {
-    const stack = Stack.of(this);
-
+  private setApiGatewayLogging(
+    stack: Stack,
+    { environment }: { environment: string },
+  ): void {
     const accessLogs = logGroupArn(
       stack,
       apiAccessLogGroupName(environment, "*"),

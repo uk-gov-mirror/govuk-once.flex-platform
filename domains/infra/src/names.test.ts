@@ -4,10 +4,12 @@ import {
   apiAccessLogGroupName,
   apiExecutionLogGroupName,
   certificateParameterName,
+  deployRoleName,
   domainFunctionName,
   executionRoleName,
   functionLogGroupName,
   integrationRoleName,
+  isolatedSubnetIdsParameterName,
   lambdaEndpointSecurityGroupParameterName,
   securityGroupParameterName,
   vpcIdParameterName,
@@ -23,6 +25,7 @@ describe("names", () => {
   it("name what every domain in an environment shares from the environment's name", () => {
     expect(executionRoleName("sandbox")).toBe("domain-sandbox-execution");
     expect(integrationRoleName("sandbox")).toBe("domain-sandbox-integration");
+    expect(deployRoleName("sandbox")).toBe("domain-sandbox-deploy");
   });
 
   it("put the platform's log groups and parameters under /flex/domain", () => {
@@ -42,6 +45,9 @@ describe("names", () => {
 
   it("read the VPC's hand-written parameters under /flex/network", () => {
     expect(vpcIdParameterName("sandbox")).toBe("/flex/network/sandbox/vpc-id");
+    expect(isolatedSubnetIdsParameterName("sandbox")).toBe(
+      "/flex/network/sandbox/isolated-subnet-ids",
+    );
     expect(lambdaEndpointSecurityGroupParameterName("sandbox")).toBe(
       "/flex/network/sandbox/lambda-endpoint-security-group-id",
     );

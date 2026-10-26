@@ -30,6 +30,10 @@ export function integrationRoleName(environment: string): string {
   return `domain-${environment}-integration`;
 }
 
+export function deployRoleName(environment: string): string {
+  return `domain-${environment}-deploy`;
+}
+
 export function functionLogGroupName(environment: string): string {
   return `/flex/domain/${environment}/function`;
 }
@@ -52,6 +56,10 @@ export function securityGroupParameterName(environment: string): string {
 
 export function vpcIdParameterName(environment: string): string {
   return `/flex/network/${environment}/vpc-id`;
+}
+
+export function isolatedSubnetIdsParameterName(environment: string): string {
+  return `/flex/network/${environment}/isolated-subnet-ids`;
 }
 
 export function lambdaEndpointSecurityGroupParameterName(
