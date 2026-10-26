@@ -1,6 +1,7 @@
 // Names derived from config, so nothing reads one back from a deployed stack. Grouped by template:
 //
-//   domain-{environment}-{domain}     a domain's function
+//   {domain}.{zone}                   the host a domain's API answers at
+//   domain-{environment}-{domain}     a domain's function, and its API with `-api`
 //   domain-{environment}-{thing}      what every domain in an environment shares
 //   /flex/domain/{environment}/...    log groups and parameters the platform creates
 //   /flex/network/{environment}/...   parameters written by hand, for the VPC that isn't ours
@@ -13,6 +14,11 @@ export const LIVE_ALIAS = "live";
 
 export const FUNCTION_NAME_LENGTH = 64;
 
+// The domain's custom domain and the Frontdoor's routing map both use this, so they can't drift.
+export function domainHost(domain: string, zoneName: string): string {
+  return `${domain}.${zoneName}`;
+}
+
 // The function is created outside CloudFormation, from the team's code, so everything else finds
 // it by this name rather than by reference.
 export function domainFunctionName(
@@ -20,6 +26,10 @@ export function domainFunctionName(
   domain: string,
 ): string {
   return `domain-${environment}-${domain}`;
+}
+
+export function apiName(environment: string, domain: string): string {
+  return `${domainFunctionName(environment, domain)}-api`;
 }
 
 export function executionRoleName(environment: string): string {

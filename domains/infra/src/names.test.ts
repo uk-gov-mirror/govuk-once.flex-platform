@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   apiAccessLogGroupName,
   apiExecutionLogGroupName,
+  apiName,
   certificateParameterName,
   deployRoleName,
   domainFunctionName,
+  domainHost,
   executionRoleName,
   functionLogGroupName,
   integrationRoleName,
@@ -16,10 +18,11 @@ import {
 } from "./names.ts";
 
 describe("names", () => {
-  it("name a domain's function from the environment's and the domain's names", () => {
+  it("name a domain's function and API from the environment's and the domain's names", () => {
     expect(domainFunctionName("sandbox", "domain-a")).toBe(
       "domain-sandbox-domain-a",
     );
+    expect(apiName("sandbox", "domain-a")).toBe("domain-sandbox-domain-a-api");
   });
 
   it("name what every domain in an environment shares from the environment's name", () => {
@@ -50,6 +53,12 @@ describe("names", () => {
     );
     expect(lambdaEndpointSecurityGroupParameterName("sandbox")).toBe(
       "/flex/network/sandbox/lambda-endpoint-security-group-id",
+    );
+  });
+
+  it("put a domain's host under its domain account's zone", () => {
+    expect(domainHost("domain-a", "sandbox.flex-domain00.example")).toBe(
+      "domain-a.sandbox.flex-domain00.example",
     );
   });
 

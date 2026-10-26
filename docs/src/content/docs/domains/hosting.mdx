@@ -1,6 +1,6 @@
 ---
 title: Hosting a domain
-description: How a domain is declared in config, what each domain account provides, and what the platform provides around a domain's function.
+description: How a domain is declared in config, what each domain account and domain provides, and what the platform provides around a domain's function.
 ---
 
 import { Aside } from "@astrojs/starlight/components";
@@ -126,16 +126,69 @@ API Gateway's logging role may write only to the domains' API access log groups,
 `/flex/domain/<environment>/<domain>/api-access`, and to API Gateway's execution log groups. It
 creates none: each domain's stack creates them first, encrypted.
 
+## What a domain provides
+
+`Domain` builds one domain's API, in eu-west-2. It holds no function: it reaches the domain's
+function by name.
+
+| Resource | Does |
+|---|---|
+| `domain-<environment>-<domain>-api` | A regional REST API. Its `execute-api` address is turned off, so its custom domain is the only way in. |
+| Resource policy | Lets in only the Frontdoor's edge role, and denies every other principal. See [who can call it](#who-can-call-it). |
+| `ANY` on `/` and on `/{proxy+}` | Every method on every path, each sent to the domain's function. See [routing a request](#routing-a-request). |
+| Stage `default` | The API's one stage. It is traced with X-Ray, logs errors, and never logs request or response bodies. |
+| `/flex/domain/<environment>/<domain>/api-access` | The API's access logs, one JSON line per request |
+| `API-Gateway-Execution-Logs_<api id>/default` | The stage's execution logs, created before API Gateway would create it, so it is encrypted and kept for a year |
+| Gateway responses | API Gateway's own refusals, in the Frontdoor's shape. See [errors](#errors). |
+| `<domain>.<zone>` | The custom domain, with the domain account's wildcard certificate, mapped to the stage at its root, and its alias record in the account's zone. Only CloudFront reaches it, over IPv4. |
+
+The stage has no throttling of its own, so it shares the account's limits. The Frontdoor's web
+ACL limits each token and each IP address before a request reaches it.
+
+### Who can call it
+
+Every method uses IAM authorisation. The Frontdoor signs each request with SigV4 as its edge role.
+The resource policy allows the Frontdoor's account only when the caller is that role, and denies
+everyone else, so a principal in the domain account with permission to invoke APIs is refused
+too.
+
+The policy names the role in a condition, never as a principal: API Gateway refuses a policy that
+names a role that doesn't exist yet, and the Frontdoor's stacks deploy after the domains'.
+
+### Errors
+
+When API Gateway refuses a request itself, it answers in the same shape as the Frontdoor, with
+`x-rejected-by: api-gateway`, as the Frontdoor's own refusals name the part that refused:
+
+| Response | Status | Body |
+|---|---|---|
+| Unauthorised, access denied, invalid signature, missing authentication token, expired token | 401 or 403 | `{"message":"Unauthorized","type":"auth_error"}` |
+| Throttled | 429 | `{"message":"Too many requests","type":"client_error"}` |
+| Any other 4xx | 4xx | `{"message":<API Gateway's own message>,"type":"client_error"}`. Its messages are fixed, so no caller's text reaches the body. |
+| Any 5xx | 5xx | `{"message":"Internal server error","type":"server_error"}` |
+
+A response from the domain's own code passes through unchanged.
+
+### TLS
+
+The custom domain uses `SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09` in `STRICT` mode. It offers
+TLS 1.3 and still accepts TLS 1.2 with forward secrecy, because CloudFront may reach an origin with
+either.
+
 ## Routing a request
 
-Planned. The domain's API answers every path and method under the domain's root, with `ANY` on
-`/` and on `/{proxy+}`, and passes each request to the domain's function unchanged. The API checks
-that the Frontdoor signed the request, and nothing about the path, method or body. The domain's
-code decides which routes exist and how each is handled, and answers anything else itself, such as
-with a 404.
+The domain's API answers every path and method under the domain's root, and passes each request to
+the domain's function unchanged. It checks that the Frontdoor signed the request, and nothing
+about the path, method or body. The domain's code decides which routes exist and how each is
+handled, and answers anything else itself, such as with a 404.
 
 So a domain adds or changes a route by releasing its code. No change to the platform's config or
 stacks is needed.
+
+The API invokes the function's `live` alias, by an ARN built from the function's name, through the
+domain account's integration role. Each release publishes a version and moves `live` to it, so the
+API reaches only code that was deliberately released, and moving the alias back rolls a release
+back. Until the first release there is no `live`, and the API answers 500.
 
 ## The domain's function
 
